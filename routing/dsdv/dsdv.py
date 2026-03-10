@@ -73,7 +73,7 @@ class Dsdv:
                                             id_hello_packet=config.GL_ID_HELLO_PACKET,
                                             hello_packet_length=config.HELLO_PACKET_LENGTH,
                                             packet_type='immediate',
-                                            routing_table=self.routing_table.routing_table,
+                                            routing_table=self.routing_table.table,
                                             simulator=self.simulator,
                                             channel_id=channel_id)
                 hello_pkd.transmission_mode = 1  # broadcast
@@ -90,13 +90,13 @@ class Dsdv:
         # channel assignment
         channel_id = self.my_drone.channel_assigner.channel_assign()
 
-        self.routing_table.routing_table[self.my_drone.identifier][2] += 2  # important!
+        self.routing_table.table[self.my_drone.identifier][2] += 2  # important!
         hello_pkd = DsdvHelloPacket(src_drone=my_drone,
                                     creation_time=self.simulator.env.now,
                                     id_hello_packet=config.GL_ID_HELLO_PACKET,
                                     hello_packet_length=config.HELLO_PACKET_LENGTH,
                                     packet_type='periodic',
-                                    routing_table=self.routing_table.routing_table,
+                                    routing_table=self.routing_table.table,
                                     simulator=self.simulator,
                                     channel_id=channel_id)
         hello_pkd.transmission_mode = 1  # broadcast
@@ -155,7 +155,7 @@ class Dsdv:
 
             if packet_type == 'periodic':
                 self.routing_table.update_item(packet, current_time)
-                # self.routing_table.print_neighbor(self.my_drone)
+                # self.routing_table.print_item(self.my_drone)
             elif packet_type == 'immediate':
                 self.routing_table.update_item(packet, current_time)
                 packet_id = packet.packet_id
@@ -170,7 +170,7 @@ class Dsdv:
                                                 id_hello_packet=packet_id,
                                                 hello_packet_length=config.HELLO_PACKET_LENGTH,
                                                 packet_type='immediate',
-                                                routing_table=self.routing_table.routing_table,
+                                                routing_table=self.routing_table.table,
                                                 simulator=self.simulator,
                                                 channel_id=channel_id)
                     hello_pkd.transmission_mode = 1  # broadcast

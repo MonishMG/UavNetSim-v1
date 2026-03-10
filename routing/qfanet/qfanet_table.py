@@ -1,83 +1,70 @@
-#!/usr/bin/env python
-# -*- coding: UTF-8 -*-
-'''
-@Project ：UavNetSim
-@File    ：qfanet_table.py
-@Author  ：abing xbb992@vip.qq.com
-@Date    ：2025/8/20
-@Update  ：2025/8/29
-'''
-import math
-
 import numpy as np
 from collections import defaultdict
-
 from utils import util_function
+from routing.base.base_table import BaseTable
 from utils.util_function import euclidean_distance_3d
 from phy.large_scale_fading import maximum_communication_range
 
 
-class QFanetTable:
+class QFanetTable(BaseTable):
     """
     Q-FANET tables
     """
     """
-            The structure of the neighbor table in Q-FANET
-            |    Drone id   |  1  |  2       |    3      |    4   |  5   |        6           |   7   |
-            | neighbor_id 1 | pos | velocity | timestamp | energy | sinr | [dst_id:{rewards}] | delay |
-            | neighbor_id 2 | pos | velocity | timestamp | energy | sinr | [dst_id:{rewards}] | delay |
-            |       ...     | ... | ...      |
-            | neighbor_id N | pos | velocity | timestamp | energy | sinr | [dst_id:{rewards}] | delay |
-            """
+        The structure of the neighbor table in Q-FANET
+        |    Drone id   |  0  |    1     |   2    |  3   |        4           |   5   |     6     |
+        | neighbor_id 1 | pos | velocity | energy | sinr | [dst_id:{rewards}] | delay | time step |
+        | neighbor_id 2 | pos | velocity | energy | sinr | [dst_id:{rewards}] | delay | time step |
+        |       ...     | ... | ...      |
+        | neighbor_id N | pos | velocity | energy | sinr | [dst_id:{rewards}] | delay | time step |
+    
+    Author: abing, xbb992@vip.qq.com
+    Created at: 2025/8/20
+    Updated at: 2026/3/10
+    """
     def __init__(self, env, my_drone, rng_routing):
-
+        super().__init__(env, my_drone)
         self.env = env
         self.my_drone = my_drone
         self.rng_routing = rng_routing
-        self.neighbor_table = defaultdict(lambda: [None, None, 0, 0, [], defaultdict(list),None])
-        self.entry_life_time = 2 * 1e6
+        self.table = defaultdict(lambda: [None, None, 0, [], defaultdict(list), None, 0])
         self.lookback = 10  # history window size
 
         n_drones = my_drone.simulator.n_drones
-        self.q_table = np.full((n_drones, n_drones), 0.5)  # 初始值0.5
+        self.q_table = np.full((n_drones, n_drones), 0.5)
         self.max_comm_range = maximum_communication_range()
 
-    def is_neighbor(self, drone_id):
+    def is_item(self, drone_id):
         """Check if the drone is a neighbor"""
-        if drone_id not in self.neighbor_table:
+        if drone_id not in self.table:
             return False
         # check if the neighbor entry is expired
-        if self.neighbor_table[drone_id][2] + self.entry_life_time <= self.env.now:
+        if self.table[drone_id][-1] + self.entry_life_time <= self.env.now:
             return False
         dist = euclidean_distance_3d(
             self.my_drone.coords,
-            self.neighbor_table[drone_id][0]
+            self.table[drone_id][0]
         )
         return dist <= self.max_comm_range
 
-    def add_neighbor(self, hello_packet, cur_time, cur_sinr):
+    def add_item(self, hello_packet, cur_time, cur_sinr=None):
         """Add neighbor to the table"""
         src_id = hello_packet.src_drone.identifier
         if src_id == self.my_drone.identifier:
             return
         delay = cur_time - hello_packet.creation_time
 
-        self.neighbor_table[src_id][0] = hello_packet.cur_position
-        self.neighbor_table[src_id][1] = hello_packet.cur_velocity
-        self.neighbor_table[src_id][2] = cur_time
-        self.neighbor_table[src_id][3] = hello_packet.src_energy
-        self.neighbor_table[src_id][4] = cur_sinr
-        self.neighbor_table[src_id][6] = delay
-        # [pos,velocity,timestamp,energy,sinr,list of reward history,delay]
+        self.table[src_id][0] = hello_packet.cur_position
+        self.table[src_id][1] = hello_packet.cur_velocity
 
+        self.table[src_id][2] = hello_packet.src_energy   # 3
+        self.table[src_id][3] = cur_sinr  # 4
+        self.table[src_id][5] = delay  # 6
+        self.table[src_id][6] = cur_time
+        # [pos,velocity,energy,sinr,list of reward history,delay,timestamp]
 
-    def purge(self):
-        """Remove expired neighbor entry"""
-        for drone_id in list(self.neighbor_table.keys()):
-            if not self.is_neighbor(drone_id):
-                del self.neighbor_table[drone_id]
-
-    def calculate_eta(self, sinr):
+    @staticmethod
+    def calculate_eta(sinr):
         """Transform SINR to eta value"""
         if sinr < 8:
             return 0.0
@@ -92,26 +79,26 @@ class QFanetTable:
 
     def calculate_velocity_constraint(self, neighbor_id, dst_drone):
         """Calculate Velocity"""
-        if not self.is_neighbor(neighbor_id):
+        if not self.is_item(neighbor_id):
             return -1
 
         d_myself_dst = euclidean_distance_3d(self.my_drone.coords, dst_drone.coords)
-        d_neighbor_dst = euclidean_distance_3d(self.neighbor_table[neighbor_id][0], dst_drone.coords)
+        d_neighbor_dst = euclidean_distance_3d(self.table[neighbor_id][0], dst_drone.coords)
 
-        delay = self.neighbor_table[neighbor_id][6] / 1e6
+        delay = self.table[neighbor_id][5] / 1e6
         return (d_myself_dst - d_neighbor_dst) / delay
 
     def void_area_judgment(self, dst_drone):
         """Routing hole judgment"""
         self.purge()
-        if not self.neighbor_table:
+        if not self.table:
             return 1
 
         d_myself_dst = euclidean_distance_3d(self.my_drone.coords, dst_drone.coords)
-        for neighbor_id in self.neighbor_table:
-            if not self.is_neighbor(neighbor_id):
+        for neighbor_id in self.table:
+            if not self.is_item(neighbor_id):
                 continue
-            d_neighbor_dst = euclidean_distance_3d(self.neighbor_table[neighbor_id][0], dst_drone.coords)
+            d_neighbor_dst = euclidean_distance_3d(self.table[neighbor_id][0], dst_drone.coords)
             if d_neighbor_dst <= d_myself_dst:
                 return 0
         return 1
@@ -125,7 +112,7 @@ class QFanetTable:
         required_velocity = dist_to_dest / packet_deadline
         candidates = []
         sub_candidates = []
-        for neighbor_id in self.neighbor_table:
+        for neighbor_id in self.table:
             velocity = self.calculate_velocity_constraint(neighbor_id, dst_drone)
             if velocity > required_velocity:
                 candidates.append(neighbor_id)
@@ -138,10 +125,9 @@ class QFanetTable:
     def best_neighbor(self, packet, dst_drone, epsilon=0.1):
         self.purge()
         dst_id = dst_drone.identifier
-        if len(self.neighbor_table.keys()) == 0:
+        if len(self.table.keys()) == 0:
             return self.my_drone.identifier
-        # candidates 满足约束的邻居
-        # sub 仅仅大于0的邻居
+
         candidates, sub_candidates = self.get_candidate_neighbors(dst_drone, packet)
         if len(candidates) > 0:
             # Q-Noise+
@@ -158,10 +144,10 @@ class QFanetTable:
 
     def update_q_value(self, next_hop_id, dst_id, reward, sinr_eta):
         """Q-Noise+ update"""
-        if not self.is_neighbor(next_hop_id):
+        if not self.is_item(next_hop_id):
             return
         # get the lookback rewards history
-        lookback_rewards = self.neighbor_table[next_hop_id][5].get(dst_id, [])
+        lookback_rewards = self.table[next_hop_id][4].get(dst_id, [])
         lookback_rewards = lookback_rewards[-self.lookback:]
         # generate random weights
         weights = [self.rng_routing.random() for _ in range(self.lookback)]
@@ -175,7 +161,7 @@ class QFanetTable:
                                             0.6 * reward + \
                                             (0.7 * sinr_eta)
 
-        self.neighbor_table[next_hop_id][5][dst_id].append(reward)
-        self.neighbor_table[next_hop_id][5][dst_id] = self.neighbor_table[next_hop_id][5][dst_id][-self.lookback:]
+        self.table[next_hop_id][4][dst_id].append(reward)
+        self.table[next_hop_id][4][dst_id] = self.table[next_hop_id][4][dst_id][-self.lookback:]
 
 

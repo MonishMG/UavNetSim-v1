@@ -1,16 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: UTF-8 -*-
-'''
-@Project ：UavNetSim
-@File    ：qfanet.py
-@Author  ：abing xbb992@vip.qq.com
-@Date    ：2025/8/20
-@Update  ：2025/8/29
-'''
 import copy
 import random
 from utils.util_function import has_intersection
-from phy.large_scale_fading import general_path_loss, sinr_calculator
+from phy.large_scale_fading import sinr_calculator
 from simulator.log import logger
 from entities.packet import DataPacket
 from routing.qfanet.qfanet_packet import QFanetHelloPacket, QFanetAckPacket
@@ -24,6 +15,10 @@ class QFanet:
     References:
         [1] da Costa, Luis Antonio LF, Rafael Kunst, and Edison Pignaton de Freitas.
         "Q-FANET: Improved Q-learning based routing protocol for FANETs." Computer Networks 198 (2021): 108379
+
+    Author: abing, xbb992@vip.qq.com
+    Created at: 2025/8/20
+    Updated at: 2026/3/10
     """
 
     def __init__(self, simulator, my_drone):
@@ -117,7 +112,7 @@ class QFanet:
         if isinstance(packet, QFanetHelloPacket):
             packet_copy = copy.copy(packet)
             current_sinr = self.cal_p2p_sinr(packet_copy, src_drone_id)
-            self.table.add_neighbor(packet_copy, current_time, current_sinr)
+            self.table.add_item(packet_copy, current_time, current_sinr)
             logger.info(
                 'At time: %s (us) ---- UAV: %s receives HELLO from %s (SINR: %.1f dB)',
                 current_time, self.my_drone.identifier, src_drone_id, current_sinr

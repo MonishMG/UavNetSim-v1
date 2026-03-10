@@ -3,11 +3,13 @@ import numpy as np
 import random
 from routing.qmr import qmr_config
 from utils import config, util_function
+from routing.base.base_table import BaseTable
 
 logger = logging.getLogger("network_routing")
 
-class QMRTable:
+class QMRTable(BaseTable):
     def __init__(self, env, my_drone):
+        super().__init__(env, my_drone)
         self.env = env
         self.my_drone = my_drone
 
@@ -20,7 +22,6 @@ class QMRTable:
         | neighbor_id N | pos | vec | energy | Q-value | LQ | cur_time | last_max_q | delay |
         """
 
-        self.neighbor_table = {}
         self.discount_factor = 0.5
 
         self.total_delay_recorder = {} # key: neighbor_id, value: list
@@ -30,17 +31,11 @@ class QMRTable:
         self.window_for_uniformed_delay = qmr_config.hello_interval * 10
 
         self.last_neighbor_set = None
-        self.entry_life_time = 2 * 1e6  # unit: us
         self.sliding_win_length_mac = 10
         self.sliding_win_length_queuing = 10
         self.max_length_delay = 10
         self.beta = 0.5
         self.omega = 0.5
-
-    def is_empty(self):
-        """Determine if the neighbor table is empty"""
-
-        return not bool(self.neighbor_table)
 
     def add_new_neighbor_entry(self, drone_id):
         """Add a new entry in the neighbor table"""
@@ -62,7 +57,7 @@ class QMRTable:
             "dc": 0.5,
         }
 
-        self.neighbor_table[drone_id] = entry
+        self.table[drone_id] = entry
 
     def update_neighbor(self, hello_packet, cur_time):
         """Update neighbor entry according to the incoming hello packet"""
@@ -74,10 +69,10 @@ class QMRTable:
             remain_energy = hello_packet.remain_energy
             lq = self.generate_lq(hello_packet, neighbor_id, hello_packet.received_hello_packet_count)
 
-            if neighbor_id not in self.neighbor_table:
+            if neighbor_id not in self.table:
                 self.add_new_neighbor_entry(neighbor_id)
 
-            entry = self.neighbor_table[neighbor_id]
+            entry = self.table[neighbor_id]
             entry["recorded_pos"] = cur_pos
             entry["recorded_vel"] = cur_vel
             entry["remain_energy"] = remain_energy
@@ -85,27 +80,10 @@ class QMRTable:
             entry["updated_time"] = cur_time
 
     def get_updated_time(self, drone_id):
-        if drone_id not in self.neighbor_table.keys():
+        if drone_id not in self.table.keys():
             raise RuntimeError('This item is not in the neighbor table')
         else:
-            return self.neighbor_table[drone_id]["updated_time"]
-
-    def remove_neighbor(self, drone_id):
-        """Delete the specified entry"""
-        self.my_drone.routing_protocol.history_packet_recorder.clear_received_packets_for_neighbor(drone_id)
-        del self.neighbor_table[drone_id]
-
-    def purge(self):
-        """Remove the expired entry in neighbor table"""
-
-        if self.is_empty():
-            # it means that the neighbor table is empty
-            return
-
-        for neighbor_id in list(self.neighbor_table.keys()):
-            updated_time = self.get_updated_time(neighbor_id)
-            if updated_time + self.entry_life_time <= self.env.now:
-                self.remove_neighbor(neighbor_id)
+            return self.table[drone_id]["updated_time"]
 
     def generate_lq(self, hello_packet, neighbor_id, received_hello_count):
         """
@@ -177,20 +155,20 @@ class QMRTable:
         Returns: actual velocity of the data packet
         """
 
-        pos_x_j = self.neighbor_table[neighbor_id]["recorded_pos"][0]
-        pos_y_j = self.neighbor_table[neighbor_id]["recorded_pos"][1]
-        pos_z_j = self.neighbor_table[neighbor_id]["recorded_pos"][2]
-        v_x_j = self.neighbor_table[neighbor_id]["recorded_vel"][0]
-        v_y_j = self.neighbor_table[neighbor_id]["recorded_vel"][1]
-        v_z_j = self.neighbor_table[neighbor_id]["recorded_vel"][2]
+        pos_x_j = self.table[neighbor_id]["recorded_pos"][0]
+        pos_y_j = self.table[neighbor_id]["recorded_pos"][1]
+        pos_z_j = self.table[neighbor_id]["recorded_pos"][2]
+        v_x_j = self.table[neighbor_id]["recorded_vel"][0]
+        v_y_j = self.table[neighbor_id]["recorded_vel"][1]
+        v_z_j = self.table[neighbor_id]["recorded_vel"][2]
 
         # "t1" is the updated time of this entry
-        t1 = self.neighbor_table[neighbor_id]["updated_time"]
+        t1 = self.table[neighbor_id]["updated_time"]
 
         # "t2" is the current moment
         t2 = cur_time
 
-        delay = self.neighbor_table[neighbor_id]["delay"]
+        delay = self.table[neighbor_id]["delay"]
 
         t3 = t2 + delay
 
@@ -276,7 +254,7 @@ class QMRTable:
         while len(self.total_delay_recorder[neighbor_id]) > self.max_length_delay:
             self.total_delay_recorder[neighbor_id].pop(0)
 
-        self.neighbor_table[neighbor_id]["delay"] = total_delay
+        self.table[neighbor_id]["delay"] = total_delay
 
     def get_normalized_delay(self, neighbor_id):
         """Used in adaptively adjusting the learning rate"""
@@ -306,19 +284,19 @@ class QMRTable:
         elif f == 1:
             reward = 10
         else:
-            delay = self.neighbor_table[next_hop_id]["delay"] / 1e6
-            neighbor_energy_factor = self.neighbor_table[next_hop_id]["remain_energy"] / config.INITIAL_ENERGY
+            delay = self.table[next_hop_id]["delay"] / 1e6
+            neighbor_energy_factor = self.table[next_hop_id]["remain_energy"] / config.INITIAL_ENERGY
             reward = self.omega * np.exp(-delay) + (1 - self.omega) * neighbor_energy_factor
         return reward
 
     def get_max_q(self):
-        if len(self.neighbor_table) == 0:
+        if len(self.table) == 0:
             return 0
-        return max([self.neighbor_table[neighbor_id]["q_value"] for neighbor_id in self.neighbor_table.keys()])
+        return max([self.table[neighbor_id]["q_value"] for neighbor_id in self.table.keys()])
 
     def filter_space_of_exploration(self, packet, destination, cur_time):
 
-        cur_neighbor_ids = self.neighbor_table.keys()
+        cur_neighbor_ids = self.table.keys()
         packet_deadline = (packet.creation_time + packet.deadline - cur_time) / 1e6
 
         # calculate the required velocity
@@ -331,11 +309,11 @@ class QMRTable:
 
         for neighbor_id in cur_neighbor_ids:
             # calculate the actual velocity of each neighbor
-            neighbor_entry = self.neighbor_table[neighbor_id]
+            neighbor_entry = self.table[neighbor_id]
             actual_velocity = self.compute_actual_velocity_3d(neighbor_id, cur_time, dist_to_dest, destination.coords)
 
             actual_velocity_dict[neighbor_id] = actual_velocity
-            self.neighbor_table[neighbor_id]["actual_velocity"] = actual_velocity
+            self.table[neighbor_id]["actual_velocity"] = actual_velocity
 
             if actual_velocity < required_velocity:
                 sub_candidate_neighbors.append((neighbor_id, actual_velocity))
@@ -357,21 +335,21 @@ class QMRTable:
 
             k = m * lq
             candidate_neighbors.append((neighbor_id, k))
-            self.neighbor_table[neighbor_id]["k_factor"] = k
-            self.neighbor_table[neighbor_id]["weighted_q_value"] = k * self.neighbor_table[neighbor_id]["q_value"]
+            self.table[neighbor_id]["k_factor"] = k
+            self.table[neighbor_id]["weighted_q_value"] = k * self.table[neighbor_id]["q_value"]
 
         return candidate_neighbors, sub_candidate_neighbors, actual_velocity_dict, required_velocity
 
     def route_decision_qmr(self, packet, destination):
         cur_time = self.env.now
-        cur_neighbor_ids = self.neighbor_table.keys()
+        cur_neighbor_ids = self.table.keys()
 
         candidate_neighbors, sub_candidate_neighbors, actual_velocity_dict, min_velocity = (
             self.filter_space_of_exploration(packet, destination, cur_time))
 
         if len(candidate_neighbors) > 0:
             # find the best next hop that has the maximum Q-value
-            chosen_neighbor_id = max(candidate_neighbors, key=lambda x: x[1] * self.neighbor_table[x[0]]["q_value"])[0]
+            chosen_neighbor_id = max(candidate_neighbors, key=lambda x: x[1] * self.table[x[0]]["q_value"])[0]
 
         elif len(sub_candidate_neighbors) > 0:
             chosen_neighbor_id = max(sub_candidate_neighbors, key=lambda x: x[1])[0]
@@ -380,7 +358,7 @@ class QMRTable:
             if len(cur_neighbor_ids) == 0:
                 chosen_neighbor_id = self.my_drone.identifier
             else:
-                chosen_neighbor_id = max(cur_neighbor_ids, key=lambda x: self.neighbor_table[x]["q_value"])
+                chosen_neighbor_id = max(cur_neighbor_ids, key=lambda x: self.table[x]["q_value"])
 
         return chosen_neighbor_id
 
@@ -397,16 +375,16 @@ class QMRTable:
         if random_num < eps:
             # exploration
             logger.info(f"uav: {self.my_drone.identifier}, blind search, current eps: {eps}, random num: {random_num}")
-            if len(self.neighbor_table) == 0:
+            if len(self.table) == 0:
                 logger.info(f"uav: {self.my_drone.identifier}, no neighbor, return None")
                 return None
-            return random.choice(list(self.neighbor_table.keys()))
+            return random.choice(list(self.table.keys()))
         # exploitation
         logger.info(f"uav: {self.my_drone.identifier}, use the max q value, current eps: {eps}, random num: {random_num}")
-        if len(self.neighbor_table) == 0:
+        if len(self.table) == 0:
             logger.info(f"uav: {self.my_drone.identifier}, no neighbor, return None")
             return None
-        return max(self.neighbor_table.keys(), key=lambda x: self.neighbor_table[x]["q_value"])
+        return max(self.table.keys(), key=lambda x: self.table[x]["q_value"])
 
     def update_discounted_factor(self):
         self.discount_factor = 0.4
@@ -415,11 +393,11 @@ class QMRTable:
         return
 
     def update_q_value(self, f, max_q, next_hop_id, is_penalty, dst_drone=None):
-        if next_hop_id not in self.neighbor_table:
+        if next_hop_id not in self.table:
             return
 
-        self.neighbor_table[next_hop_id]["last_max_q"] = max_q
-        q_value = self.neighbor_table[next_hop_id]["q_value"]
+        self.table[next_hop_id]["last_max_q"] = max_q
+        q_value = self.table[next_hop_id]["q_value"]
 
         reward = self.get_reward(f, is_penalty, next_hop_id)
 
@@ -438,9 +416,9 @@ class QMRTable:
 
         q_value = q_value + lr * (reward + dc * max_q - q_value)
 
-        self.neighbor_table[next_hop_id]["q_value"] = q_value
-        self.neighbor_table[next_hop_id]["lr"] = lr
-        self.neighbor_table[next_hop_id]["dc"] = dc
+        self.table[next_hop_id]["q_value"] = q_value
+        self.table[next_hop_id]["lr"] = lr
+        self.table[next_hop_id]["dc"] = dc
 
     def check_local_minimum(self, destination):
         if self.my_drone.identifier == destination.identifier:
@@ -448,8 +426,8 @@ class QMRTable:
         my_pos = self.my_drone.coords
         dest_pos = destination.coords
         my_dist_to_dest = util_function.euclidean_distance_3d(my_pos, dest_pos)
-        for neighbor_id in self.neighbor_table.keys():
-            neighbor_pos = self.neighbor_table[neighbor_id]["recorded_pos"]
+        for neighbor_id in self.table.keys():
+            neighbor_pos = self.table[neighbor_id]["recorded_pos"]
             neighbor_dist_to_dest = util_function.euclidean_distance_3d(neighbor_pos, dest_pos)
             if neighbor_dist_to_dest < my_dist_to_dest:
                 return False

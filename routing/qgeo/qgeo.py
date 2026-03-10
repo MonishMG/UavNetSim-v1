@@ -118,7 +118,7 @@ class QGeo:
 
         current_time = self.simulator.env.now
         if isinstance(packet, QGeoHelloPacket):
-            self.table.add_neighbor(packet, current_time)  # update the neighbor table
+            self.table.add_item(packet, current_time)  # update the neighbor table
 
         elif isinstance(packet, DataPacket):
             packet_copy = copy.copy(packet)

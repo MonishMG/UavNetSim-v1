@@ -123,7 +123,7 @@ class Grad:
             packet_copy.accrued_cost += 1  # increment "accrued_cost" field by one
 
             self.cost_table.update_entry(packet_copy, current_time)
-            # self.cost_table.print_cost_table()
+            # self.cost_table.print_item()
 
             if msg_type == "M_REQUEST":
                 if self.my_drone.identifier is target.identifier:
