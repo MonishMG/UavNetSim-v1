@@ -3,7 +3,7 @@
 </div>
 
 <div align="center">
-  <h1>UavNetSim-v1: 基于Python的无人机通信网络仿真平台</h1>
+  <h1>UavNetSim: 基于Python的无人机通信网络仿真平台</h1>
 
   <img src="https://img.shields.io/badge/Github-%40Zihao--Felix--Zhou-blue" height="20">
   <img src="https://img.shields.io/badge/License-MIT-brightgreen" height="20">
