@@ -3,7 +3,7 @@
 </div>
 
 <div align="center">
-  <h1>UavNetSim-v1: A Python based Simulation Platform for UAV Communication Networks</h1>
+  <h1>UavNetSim: A Python based Simulation Platform for UAV Communication Networks</h1>
 
   <img src="https://img.shields.io/badge/Github-%40Zihao--Felix--Zhou-blue" height="20">
   <img src="https://img.shields.io/badge/License-MIT-brightgreen" height="20">
