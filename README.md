@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/Contributions-Welcome-yellowgreen" height="20"> 
   <a href="https://hellogithub.com/repository/Zihao-Felix-Zhou/UavNetSim-v1" target="_blank"><img src="https://abroad.hellogithub.com/v1/widgets/recommend.svg?rid=51f926ec044046afb3ed23a912421445&claim_uid=yc7sS80jimthluU&theme=small" alt="Featured｜HelloGitHub" /></a>
 
-  <h3>Make simulation more friendly to novices! </h3>
+  <h3>Make the simulation easier! </h3>
 </div>
 
 Read this in other language: [中文](README_CHINESE.md)
