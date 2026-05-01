@@ -1,3 +1,4 @@
+import csv
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -318,8 +319,68 @@ class SimulationVisualizer:
         
         # Create interactive visualization
         self.create_interactive_visualization()
+
+        # Create throughput vs. UAV velocity plot
+        self.create_throughput_velocity_plot()
         
         print("Visualization complete. Output saved to:", self.output_dir)
+
+    def create_throughput_velocity_plot(self):
+        """Generate a scatter plot of throughput vs. UAV velocity and save raw data as CSV."""
+        samples = []
+        if hasattr(self.simulator, 'metrics'):
+            samples = self.simulator.metrics.throughput_velocity_samples
+
+        if not samples:
+            print("No throughput-velocity samples available; skipping throughput_vs_uav_velocity plot.")
+            return
+
+        # Filter samples that have a valid avg_src_dst_speed_mps
+        valid = [s for s in samples if s.get('avg_src_dst_speed_mps') is not None]
+        if not valid:
+            print("No valid speed data in throughput-velocity samples; skipping plot.")
+            return
+
+        velocities = np.array([s['avg_src_dst_speed_mps'] for s in valid])
+        throughputs = np.array([s['throughput_kbps'] for s in valid])
+
+        # Compute grouped mean throughput per (rounded) velocity
+        unique_velocities = sorted(set(velocities))
+        mean_throughputs = []
+        for v in unique_velocities:
+            mask = velocities == v
+            mean_throughputs.append(np.mean(throughputs[mask]))
+
+        fig, ax = plt.subplots(figsize=(9, 6))
+        ax.scatter(velocities, throughputs, alpha=0.5, s=30, label='Per-packet samples', color='steelblue')
+        ax.plot(unique_velocities, mean_throughputs, color='darkorange', linewidth=2,
+                marker='o', markersize=5, label='Mean throughput per velocity')
+
+        ax.set_title('Throughput vs UAV Velocity', fontsize=14)
+        ax.set_xlabel('UAV Velocity (m/s)', fontsize=12)
+        ax.set_ylabel('Throughput (Kbps)', fontsize=12)
+        ax.legend(fontsize=10)
+        ax.grid(True, linestyle='--', alpha=0.6)
+        plt.tight_layout()
+
+        plot_path = os.path.join(self.output_dir, 'throughput_vs_uav_velocity.png')
+        fig.savefig(plot_path, dpi=150)
+        plt.close(fig)
+        print(f"Saved throughput vs. UAV velocity plot to: {plot_path}")
+
+        # Save raw data as CSV
+        csv_path = os.path.join(self.output_dir, 'throughput_vs_uav_velocity.csv')
+        fieldnames = [
+            'packet_id', 'time_s', 'throughput_bps', 'throughput_kbps',
+            'src_id', 'dst_id', 'src_speed_mps', 'dst_speed_mps',
+            'avg_src_dst_speed_mps', 'avg_network_speed_mps',
+        ]
+        with open(csv_path, 'w', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            for s in samples:
+                writer.writerow({k: s.get(k, '') for k in fieldnames})
+        print(f"Saved throughput-velocity data to: {csv_path}")
 
     def create_interactive_visualization(self):
         """Create an interactive visualization with a slider for time navigation"""
