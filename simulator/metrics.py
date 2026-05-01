@@ -53,14 +53,44 @@ class Metrics:
 
         self.collision_num = 0
 
+        self.throughput_velocity_samples = []
+
     def calculate_metrics(self, received_packet):
         """Calculate the corresponding metrics when the destination receives a data packet successfully"""
         latency = self.simulator.env.now - received_packet.creation_time  # in us
 
         self.deliver_time_dict[received_packet.packet_id] = latency
-        self.throughput_dict[received_packet.packet_id] = received_packet.packet_length / (latency / 1e6)
+        throughput_bps = received_packet.packet_length / (latency / 1e6)
+        self.throughput_dict[received_packet.packet_id] = throughput_bps
         self.hop_cnt_dict[received_packet.packet_id] = received_packet.get_current_ttl()
         self.datapacket_arrived.add(received_packet.packet_id)
+
+        # Collect per-packet throughput vs. velocity sample
+        has_src = hasattr(received_packet, 'src_drone')
+        has_dst = hasattr(received_packet, 'dst_drone')
+
+        src_drone = received_packet.src_drone if has_src else None
+        dst_drone = received_packet.dst_drone if has_dst else None
+
+        src_speed = src_drone.speed if src_drone is not None else None
+        dst_speed = dst_drone.speed if dst_drone is not None else None
+
+        avg_src_dst_speed = (src_speed + dst_speed) / 2.0 if (src_speed is not None and dst_speed is not None) else None
+
+        avg_network_speed = np.mean([d.speed for d in self.simulator.drones]) if self.simulator.drones else None
+
+        self.throughput_velocity_samples.append({
+            'packet_id': received_packet.packet_id,
+            'time_s': self.simulator.env.now / 1e6,
+            'throughput_bps': throughput_bps,
+            'throughput_kbps': throughput_bps / 1e3,
+            'src_id': src_drone.identifier if src_drone is not None else None,
+            'dst_id': dst_drone.identifier if dst_drone is not None else None,
+            'src_speed_mps': src_speed,
+            'dst_speed_mps': dst_speed,
+            'avg_src_dst_speed_mps': avg_src_dst_speed,
+            'avg_network_speed_mps': avg_network_speed,
+        })
 
     def print_metrics(self):
         # calculate the average end-to-end delay
