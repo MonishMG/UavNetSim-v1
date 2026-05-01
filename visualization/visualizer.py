@@ -1,5 +1,7 @@
 import csv
+import glob as _glob
 import os
+import shutil
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -320,8 +322,31 @@ class SimulationVisualizer:
         # Create interactive visualization
         self.create_interactive_visualization()
 
-        # Create throughput vs. UAV velocity plot
+        # Create throughput vs. UAV velocity plot (original per-packet version)
         self.create_throughput_velocity_plot()
+
+        # New analysis plots and CSV exports
+        self._save_throughput_velocity_csvs()
+        self.create_throughput_vs_velocity_time_windowed_plot()
+        self.create_throughput_and_velocity_over_time_plot()
+        self.create_attack_impact_throughput_vs_velocity_plot()
+
+        # Summary print
+        print("\n--- Throughput / Velocity Analysis Summary ---")
+        print(f"  Velocity profile : {config.VELOCITY_PROFILE}")
+        print(f"  Dynamic velocity : {'enabled' if config.VELOCITY_PROFILE != 'constant' else 'disabled (constant 10 m/s)'}")
+        print(f"  Attack simulation: {'enabled  (type: ' + config.ATTACK_TYPE + ')' if config.ATTACK_ENABLED else 'disabled'}")
+        print(f"  Output directory : {self.output_dir}")
+        print("  New files saved  :")
+        for fname in [
+            "throughput_velocity_raw_samples.csv",
+            "throughput_velocity_time_windowed.csv",
+            "throughput_vs_velocity_time_windowed.png",
+            "throughput_and_velocity_over_time.png",
+            "attack_impact_throughput_vs_velocity.png",
+        ]:
+            print(f"    {os.path.join(self.output_dir, fname)}")
+        print("----------------------------------------------\n")
         
         print("Visualization complete. Output saved to:", self.output_dir)
 
@@ -381,6 +406,279 @@ class SimulationVisualizer:
             for s in samples:
                 writer.writerow({k: s.get(k, '') for k in fieldnames})
         print(f"Saved throughput-velocity data to: {csv_path}")
+
+    # ------------------------------------------------------------------ #
+    #  New analysis: time-windowed throughput / velocity + attack plots    #
+    # ------------------------------------------------------------------ #
+
+    def _save_throughput_velocity_csvs(self):
+        """Save raw samples and time-windowed aggregates as CSV files."""
+        samples = []
+        if hasattr(self.simulator, 'metrics'):
+            samples = self.simulator.metrics.throughput_velocity_samples
+
+        # --- raw samples ---
+        raw_path = os.path.join(self.output_dir, 'throughput_velocity_raw_samples.csv')
+        raw_fields = [
+            'time_s', 'avg_network_speed_mps', 'avg_src_dst_speed_mps',
+            'throughput_bps', 'throughput_kbps',
+            'packet_id', 'src_id', 'dst_id',
+            'attack_enabled', 'attack_type',
+        ]
+        with open(raw_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=raw_fields)
+            writer.writeheader()
+            for s in samples:
+                writer.writerow({k: s.get(k, '') for k in raw_fields})
+
+        # --- windowed aggregates ---
+        windowed = []
+        if hasattr(self.simulator, 'metrics'):
+            windowed = self.simulator.metrics.compute_time_windowed_throughput()
+
+        win_path = os.path.join(self.output_dir, 'throughput_velocity_time_windowed.csv')
+        win_fields = [
+            'window_id', 'window_start_s', 'window_end_s', 'time_s',
+            'avg_network_velocity_mps', 'avg_src_dst_velocity_mps',
+            'throughput_kbps', 'packet_count',
+            'attack_enabled', 'attack_type',
+        ]
+        with open(win_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=win_fields)
+            writer.writeheader()
+            for w in windowed:
+                writer.writerow({k: w.get(k, '') for k in win_fields})
+
+    def create_throughput_vs_velocity_time_windowed_plot(self):
+        """
+        Plot A: Throughput (Kbps) vs. Average UAV Velocity (m/s) using
+        time-windowed samples as scatter points, plus a trend line grouped
+        by velocity bins.
+
+        Output: throughput_vs_velocity_time_windowed.png
+        """
+        windowed = []
+        if hasattr(self.simulator, 'metrics'):
+            windowed = self.simulator.metrics.compute_time_windowed_throughput()
+
+        if not windowed:
+            print("No windowed data; skipping throughput_vs_velocity_time_windowed.png")
+            return
+
+        valid = [w for w in windowed if w.get('avg_network_velocity_mps') is not None]
+        if not valid:
+            print("No velocity data in windowed samples; skipping plot.")
+            return
+
+        velocities = np.array([w['avg_network_velocity_mps'] for w in valid])
+        throughputs = np.array([w['throughput_kbps'] for w in valid])
+
+        # Bin velocities into 2 m/s buckets for the trend line
+        bin_size = 2.0
+        v_min, v_max = velocities.min(), velocities.max()
+        bins = np.arange(v_min, v_max + bin_size, bin_size)
+        bin_centers, bin_means = [], []
+        for b in bins:
+            mask = (velocities >= b) & (velocities < b + bin_size)
+            if mask.sum() > 0:
+                bin_centers.append(b + bin_size / 2)
+                bin_means.append(throughputs[mask].mean())
+
+        fig, ax = plt.subplots(figsize=(9, 6))
+        ax.scatter(velocities, throughputs, alpha=0.6, s=40,
+                   label='1-s window samples', color='steelblue')
+        if bin_centers:
+            ax.plot(bin_centers, bin_means, color='darkorange', linewidth=2,
+                    marker='o', markersize=5, label='Mean per 2 m/s velocity bin')
+
+        ax.set_title('Throughput vs UAV Velocity\n(Time-Varying Mobility)', fontsize=13)
+        ax.set_xlabel('Average UAV Velocity (m/s)', fontsize=12)
+        ax.set_ylabel('Average Throughput (Kbps)', fontsize=12)
+        ax.legend(fontsize=10)
+        ax.grid(True, linestyle='--', alpha=0.6)
+        plt.tight_layout()
+
+        path = os.path.join(self.output_dir, 'throughput_vs_velocity_time_windowed.png')
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        print(f"Saved: {path}")
+
+    def create_throughput_and_velocity_over_time_plot(self):
+        """
+        Plot B: Throughput (Kbps) and Average UAV Velocity (m/s) both over
+        simulation time, sharing the x-axis.
+
+        Output: throughput_and_velocity_over_time.png
+        """
+        windowed = []
+        if hasattr(self.simulator, 'metrics'):
+            windowed = self.simulator.metrics.compute_time_windowed_throughput()
+
+        if not windowed:
+            print("No windowed data; skipping throughput_and_velocity_over_time.png")
+            return
+
+        times = np.array([w['time_s'] for w in windowed])
+        throughputs = np.array([w['throughput_kbps'] for w in windowed])
+        velocities = np.array([
+            w['avg_network_velocity_mps'] if w.get('avg_network_velocity_mps') is not None else float('nan')
+            for w in windowed
+        ])
+
+        fig, ax1 = plt.subplots(figsize=(11, 5))
+        color_tp = 'steelblue'
+        color_vel = 'darkorange'
+
+        ax1.set_xlabel('Time (s)', fontsize=12)
+        ax1.set_ylabel('Throughput (Kbps)', color=color_tp, fontsize=12)
+        ax1.plot(times, throughputs, color=color_tp, linewidth=1.5,
+                 label='Throughput (Kbps)')
+        ax1.tick_params(axis='y', labelcolor=color_tp)
+
+        ax2 = ax1.twinx()
+        ax2.set_ylabel('Average UAV Velocity (m/s)', color=color_vel, fontsize=12)
+        ax2.plot(times, velocities, color=color_vel, linewidth=1.5,
+                 linestyle='--', label='Avg Velocity (m/s)')
+        ax2.tick_params(axis='y', labelcolor=color_vel)
+
+        # Combined legend
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=10)
+
+        ax1.set_title('Throughput and UAV Velocity Over Time', fontsize=13)
+        ax1.grid(True, linestyle='--', alpha=0.5)
+        plt.tight_layout()
+
+        path = os.path.join(self.output_dir, 'throughput_and_velocity_over_time.png')
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        print(f"Saved: {path}")
+
+    def create_attack_impact_throughput_vs_velocity_plot(self):
+        """
+        Plot C: Baseline vs. attack-condition throughput vs. UAV velocity.
+
+        * Uses the current simulation's windowed data.
+        * If an existing CSV from the complementary run (attack vs. no-attack)
+          is present in the output directory it will be overlaid automatically.
+
+        Output: attack_impact_throughput_vs_velocity.png
+        """
+        windowed = []
+        if hasattr(self.simulator, 'metrics'):
+            windowed = self.simulator.metrics.compute_time_windowed_throughput()
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        plotted_anything = False
+
+        def _plot_series(w_list, label, color, marker='o'):
+            valid = [w for w in w_list if w.get('avg_network_velocity_mps') is not None]
+            if not valid:
+                return
+            velocities = np.array([w['avg_network_velocity_mps'] for w in valid])
+            throughputs = np.array([w['throughput_kbps'] for w in valid])
+            ax.scatter(velocities, throughputs, alpha=0.35, s=25, color=color)
+            # Trend line via 2 m/s bins
+            bin_size = 2.0
+            v_min, v_max = velocities.min(), velocities.max()
+            bins = np.arange(v_min, v_max + bin_size, bin_size)
+            bx, by = [], []
+            for b in bins:
+                mask = (velocities >= b) & (velocities < b + bin_size)
+                if mask.sum() > 0:
+                    bx.append(b + bin_size / 2)
+                    by.append(throughputs[mask].mean())
+            if bx:
+                ax.plot(bx, by, color=color, linewidth=2, marker=marker,
+                        markersize=5, label=label)
+
+        # --- current run ---
+        is_attack = config.ATTACK_ENABLED and config.ATTACK_TYPE != "none"
+        cur_label = (f"Attack ({config.ATTACK_TYPE})" if is_attack else "Baseline")
+        cur_color = 'crimson' if is_attack else 'steelblue'
+        if windowed:
+            _plot_series(windowed, cur_label, cur_color)
+            plotted_anything = True
+
+        # --- look for a complementary CSV from a previous run ---
+        csv_path = os.path.join(self.output_dir, 'throughput_velocity_time_windowed.csv')
+        # The CSV we just wrote belongs to the current run; look for the *other* one
+        # (if the user saves outputs with different names via ATTACK_ENABLED toggle).
+        # Convention: a run saves <attack_type>_throughput_velocity_time_windowed.csv
+        other_csv = None
+        if is_attack:
+            candidate = os.path.join(self.output_dir,
+                                     'baseline_throughput_velocity_time_windowed.csv')
+        else:
+            # Try to find any attack CSV from a previous run
+            candidates = _glob.glob(
+                os.path.join(self.output_dir, '*_throughput_velocity_time_windowed.csv'))
+            candidate = candidates[0] if candidates else None
+
+        if candidate and os.path.isfile(candidate):
+            other_csv = candidate
+
+        if other_csv:
+            try:
+                other_windowed = []
+                with open(other_csv, newline='') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        try:
+                            w = {
+                                'avg_network_velocity_mps': float(row['avg_network_velocity_mps'])
+                                if row.get('avg_network_velocity_mps') else None,
+                                'throughput_kbps': float(row['throughput_kbps'])
+                                if row.get('throughput_kbps') else None,
+                                'attack_enabled': row.get('attack_enabled', 'False') == 'True',
+                                'attack_type': row.get('attack_type', 'none'),
+                            }
+                            if w['throughput_kbps'] is not None:
+                                other_windowed.append(w)
+                        except (ValueError, KeyError):
+                            pass
+                if other_windowed:
+                    other_is_attack = other_windowed[0].get('attack_enabled', False)
+                    other_label = (
+                        f"Attack ({other_windowed[0].get('attack_type', '?')})"
+                        if other_is_attack else "Baseline"
+                    )
+                    other_color = 'crimson' if other_is_attack else 'steelblue'
+                    _plot_series(other_windowed, other_label, other_color,
+                                 marker='^')
+                    plotted_anything = True
+            except Exception as exc:
+                print(f"Could not load complementary CSV {other_csv}: {exc}")
+
+        if not plotted_anything:
+            print("No data for attack_impact_throughput_vs_velocity.png; skipping.")
+            plt.close(fig)
+            return
+
+        title = ("Attack Impact: Throughput vs UAV Velocity\n"
+                 "(Simulated network degradation — research only)")
+        ax.set_title(title, fontsize=12)
+        ax.set_xlabel('Average UAV Velocity (m/s)', fontsize=12)
+        ax.set_ylabel('Average Throughput (Kbps)', fontsize=12)
+        ax.legend(fontsize=10)
+        ax.grid(True, linestyle='--', alpha=0.6)
+        plt.tight_layout()
+
+        path = os.path.join(self.output_dir, 'attack_impact_throughput_vs_velocity.png')
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        print(f"Saved: {path}")
+
+        # Also save a named copy so future complementary runs can load it
+        named_copy = os.path.join(
+            self.output_dir,
+            ('baseline' if not is_attack else config.ATTACK_TYPE)
+            + '_throughput_velocity_time_windowed.csv'
+        )
+        src_csv = os.path.join(self.output_dir, 'throughput_velocity_time_windowed.csv')
+        if os.path.isfile(src_csv) and not os.path.isfile(named_copy):
+            shutil.copy2(src_csv, named_copy)
 
     def create_interactive_visualization(self):
         """Create an interactive visualization with a slider for time navigation"""

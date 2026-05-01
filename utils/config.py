@@ -14,6 +14,26 @@ STATIC_CASE = 0  # whether to simulate a static network
 HETEROGENEOUS = 0  # heterogeneous network support (in terms of speed)
 LOGGING_LEVEL = logging.INFO  # whether to print the detail information during simulation
 
+# --------------------- velocity profile parameters --------------------- #
+# VELOCITY_PROFILE options: "constant" | "step" | "linear" | "sinusoidal" | "random"
+# "constant" preserves the original 10 m/s fixed-speed behaviour.
+# "step" cycles through 5 → 10 → 20 → 30 m/s in four equal quarters of SIM_TIME.
+VELOCITY_PROFILE = "constant"
+
+# ----- simulated attack parameters (simulation-only network degradation) ----- #
+# NOTE: All attack behaviour is purely simulated network degradation for research
+#       and visualisation purposes only. No real exploit or offensive code is used.
+# ATTACK_TYPE options: "none" | "packet_drop" | "delay_injection" | "route_disruption"
+ATTACK_ENABLED = False
+ATTACK_TYPE = "none"
+ATTACK_START_TIME_S = 10.0       # seconds into simulation when attack begins
+ATTACK_END_TIME_S = 20.0         # seconds into simulation when attack ends
+ATTACK_DROP_PROBABILITY = 0.5    # fraction of packets randomly dropped (packet_drop / route_disruption)
+ATTACK_DELAY_US = 500000         # artificial per-packet delay in microseconds (delay_injection)
+
+# --------------------- throughput analysis parameters ------------------- #
+THROUGHPUT_WINDOW_SIZE_S = 1.0   # time-window size (s) for windowed throughput/velocity analysis
+
 # ---------- hardware parameters of drone (rotary-wing) -----------#
 PROFILE_DRAG_COEFFICIENT = 0.012
 AIR_DENSITY = 1.225  # kg/m^3

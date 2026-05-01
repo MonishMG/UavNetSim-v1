@@ -1,6 +1,7 @@
 import numpy as np
 from collections import defaultdict
 from openpyxl import load_workbook
+from utils import config
 
 
 class Metrics:
@@ -90,6 +91,8 @@ class Metrics:
             'dst_speed_mps': dst_speed,
             'avg_src_dst_speed_mps': avg_src_dst_speed,
             'avg_network_speed_mps': avg_network_speed,
+            'attack_enabled': config.ATTACK_ENABLED,
+            'attack_type': config.ATTACK_TYPE,
         })
 
     def print_metrics(self):
@@ -119,3 +122,53 @@ class Metrics:
         print('Average hop count is: ', hop_cnt)
         print('Collision num is: ', self.collision_num)
         print('Average mac delay is: ', average_mac_delay, 'ms')
+
+    def compute_time_windowed_throughput(self, window_size_s=None):
+        """
+        Group throughput_velocity_samples into fixed-width time windows and
+        compute per-window averages.
+
+        Returns a list of dicts, one per window that contained at least one
+        received packet.  Each dict contains:
+            window_id, window_start_s, window_end_s, time_s (centre),
+            avg_network_velocity_mps, avg_src_dst_velocity_mps,
+            throughput_kbps, packet_count, attack_enabled, attack_type.
+        """
+        if window_size_s is None:
+            window_size_s = config.THROUGHPUT_WINDOW_SIZE_S
+
+        samples = self.throughput_velocity_samples
+        if not samples:
+            return []
+
+        min_t = min(s['time_s'] for s in samples)
+        max_t = max(s['time_s'] for s in samples)
+
+        windows = []
+        window_id = 0
+        t = min_t
+        while t <= max_t:
+            w_start = t
+            w_end = t + window_size_s
+            w_samples = [s for s in samples if w_start <= s['time_s'] < w_end]
+            if w_samples:
+                net_speeds = [s['avg_network_speed_mps'] for s in w_samples
+                              if s.get('avg_network_speed_mps') is not None]
+                sd_speeds = [s['avg_src_dst_speed_mps'] for s in w_samples
+                             if s.get('avg_src_dst_speed_mps') is not None]
+                windows.append({
+                    'window_id': window_id,
+                    'window_start_s': w_start,
+                    'window_end_s': w_end,
+                    'time_s': (w_start + w_end) / 2.0,
+                    'avg_network_velocity_mps': float(np.mean(net_speeds)) if net_speeds else None,
+                    'avg_src_dst_velocity_mps': float(np.mean(sd_speeds)) if sd_speeds else None,
+                    'throughput_kbps': float(np.mean([s['throughput_kbps'] for s in w_samples])),
+                    'packet_count': len(w_samples),
+                    'attack_enabled': w_samples[0].get('attack_enabled', False),
+                    'attack_type': w_samples[0].get('attack_type', 'none'),
+                })
+            window_id += 1
+            t += window_size_s
+
+        return windows
