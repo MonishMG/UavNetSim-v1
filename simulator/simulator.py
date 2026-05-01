@@ -130,8 +130,7 @@ class Simulator:
             return self._velocity_target
         return 10.0  # fallback
 
-    @staticmethod
-    def _update_drone_speed(drone, new_speed):
+    def _update_drone_speed(self, drone, new_speed):
         """Update a drone's speed, velocity_mean, and scale its velocity vector."""
         if new_speed <= 0:
             return
@@ -152,7 +151,6 @@ class Simulator:
             new_speed = self._get_target_speed(frac)
             for drone in self.drones:
                 self._update_drone_speed(drone, new_speed)
-
     # ------------------------------------------------------------------ #
     #  Simulated attack (simulation-only network degradation)              #
     # ------------------------------------------------------------------ #

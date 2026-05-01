@@ -1,5 +1,7 @@
 import csv
+import glob as _glob
 import os
+import shutil
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -330,11 +332,10 @@ class SimulationVisualizer:
         self.create_attack_impact_throughput_vs_velocity_plot()
 
         # Summary print
-        from utils import config as _cfg
         print("\n--- Throughput / Velocity Analysis Summary ---")
-        print(f"  Velocity profile : {_cfg.VELOCITY_PROFILE}")
-        print(f"  Dynamic velocity : {'enabled' if _cfg.VELOCITY_PROFILE != 'constant' else 'disabled (constant 10 m/s)'}")
-        print(f"  Attack simulation: {'enabled  (type: ' + _cfg.ATTACK_TYPE + ')' if _cfg.ATTACK_ENABLED else 'disabled'}")
+        print(f"  Velocity profile : {config.VELOCITY_PROFILE}")
+        print(f"  Dynamic velocity : {'enabled' if config.VELOCITY_PROFILE != 'constant' else 'disabled (constant 10 m/s)'}")
+        print(f"  Attack simulation: {'enabled  (type: ' + config.ATTACK_TYPE + ')' if config.ATTACK_ENABLED else 'disabled'}")
         print(f"  Output directory : {self.output_dir}")
         print("  New files saved  :")
         for fname in [
@@ -564,8 +565,6 @@ class SimulationVisualizer:
 
         Output: attack_impact_throughput_vs_velocity.png
         """
-        from utils import config as _cfg
-
         windowed = []
         if hasattr(self.simulator, 'metrics'):
             windowed = self.simulator.metrics.compute_time_windowed_throughput()
@@ -595,8 +594,8 @@ class SimulationVisualizer:
                         markersize=5, label=label)
 
         # --- current run ---
-        is_attack = _cfg.ATTACK_ENABLED and _cfg.ATTACK_TYPE != "none"
-        cur_label = (f"Attack ({_cfg.ATTACK_TYPE})" if is_attack else "Baseline")
+        is_attack = config.ATTACK_ENABLED and config.ATTACK_TYPE != "none"
+        cur_label = (f"Attack ({config.ATTACK_TYPE})" if is_attack else "Baseline")
         cur_color = 'crimson' if is_attack else 'steelblue'
         if windowed:
             _plot_series(windowed, cur_label, cur_color)
@@ -613,7 +612,6 @@ class SimulationVisualizer:
                                      'baseline_throughput_velocity_time_windowed.csv')
         else:
             # Try to find any attack CSV from a previous run
-            import glob as _glob
             candidates = _glob.glob(
                 os.path.join(self.output_dir, '*_throughput_velocity_time_windowed.csv'))
             candidate = candidates[0] if candidates else None
@@ -675,12 +673,11 @@ class SimulationVisualizer:
         # Also save a named copy so future complementary runs can load it
         named_copy = os.path.join(
             self.output_dir,
-            ('baseline' if not is_attack else _cfg.ATTACK_TYPE)
+            ('baseline' if not is_attack else config.ATTACK_TYPE)
             + '_throughput_velocity_time_windowed.csv'
         )
         src_csv = os.path.join(self.output_dir, 'throughput_velocity_time_windowed.csv')
         if os.path.isfile(src_csv) and not os.path.isfile(named_copy):
-            import shutil
             shutil.copy2(src_csv, named_copy)
 
     def create_interactive_visualization(self):
